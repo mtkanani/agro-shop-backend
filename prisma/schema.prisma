@@ -65,7 +65,10 @@ model Shop {
 enum UserRole {
   SUPER_ADMIN
   OWNER
+  ADMIN
   BILLING_STAFF
+  ACCOUNTANT
+  VIEWER
 }
 
 enum UserStatus {
