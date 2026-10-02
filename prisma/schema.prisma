@@ -1,0 +1,925 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ----------------------------------------------------
+// 1. SHOP (Root Multi-Tenant Container)
+// ----------------------------------------------------
+model Shop {
+  id                String   @id @default(uuid())
+  shopName          String
+  code              String?  @unique
+  ownerName         String?
+  mobile            String
+  email             String?
+  address           String?
+  villageCity       String?
+  state             String?
+  pincode           String?
+  gstin             String?
+  fertilizerLicense String?
+  pesticideLicense  String?
+  seedLicense       String?
+  defaultLanguage   String   @default("en") // en, gu, gujlish
+  status            String   @default("ACTIVE") // ACTIVE, INACTIVE, SUSPENDED
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  users                User[]
+  farmers              Farmer[]
+  suppliers            Supplier[]
+  categories           Category[]
+  productTypes         ProductType[]
+  products             Product[]
+  inventoryBatches     InventoryBatch[]
+  stockTransactions    StockTransaction[]
+  invoices             Invoice[]
+  payments             Payment[]
+  khataAccounts        KhataAccount[]
+  khataTransactions    KhataTransaction[]
+  supplierTransactions SupplierTransaction[]
+  cashClosings         CashClosing[]
+  cashTransactions     CashTransaction[]
+  settings             Setting[]
+  auditLogs            AuditLog[]
+  salesReturns            SalesReturn[]
+  purchaseReturns         PurchaseReturn[]
+  notifications           Notification[]
+  notificationPreferences NotificationPreference[]
+  exportLogs              ExportLog[]
+  backupLogs              BackupLog[]
+  reminders               Reminder[]
+  expenses                Expense[]
+
+  @@map("shops")
+}
+
+// ----------------------------------------------------
+// 2. AUTHENTICATION & USERS
+// ----------------------------------------------------
+enum UserRole {
+  SUPER_ADMIN
+  OWNER
+  BILLING_STAFF
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+model User {
+  id           String     @id @default(uuid())
+  shopId       String?
+  shop         Shop?      @relation(fields: [shopId], references: [id], onDelete: SetNull)
+  fullName     String
+  email        String     @unique
+  mobile       String?    @unique
+  passwordHash String
+  role         UserRole   @default(BILLING_STAFF)
+  status       UserStatus @default(ACTIVE)
+  preferredLanguage String @default("en") // en, gu, gujlish
+  lastLoginAt  DateTime?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  refreshTokens     RefreshToken[]
+  passwordResets    PasswordReset[]
+  invoices          Invoice[]
+  cashClosings      CashClosing[]
+  stockTransactions StockTransaction[]
+  auditLogs         AuditLog[]
+  salesReturns           SalesReturn[]
+  purchaseReturns        PurchaseReturn[]
+  notifications          Notification[]
+  notificationPreference NotificationPreference?
+  exportLogs             ExportLog[]
+  backupLogs             BackupLog[]
+  reminders              Reminder[]
+  expenses               Expense[]
+
+  @@index([shopId])
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@map("refresh_tokens")
+}
+
+enum OtpPurpose {
+  REGISTRATION
+  FORGOT_PASSWORD
+  CHANGE_MOBILE
+}
+
+model Otp {
+  id          String     @id @default(uuid())
+  purpose     OtpPurpose @default(REGISTRATION)
+  identifier  String     // Email or Mobile Phone Number
+  otpHash     String     // Hashed OTP string
+  attempts    Int        @default(0)
+  isVerified  Boolean    @default(false)
+  verifiedAt  DateTime?
+  expiresAt   DateTime
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@index([identifier, purpose])
+  @@map("otps")
+}
+
+model PasswordReset {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String   @unique
+  otp       String?
+  isUsed    Boolean  @default(false)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@map("password_resets")
+}
+
+model PendingRegistration {
+  id           String   @id @default(uuid())
+  shopName     String
+  ownerName    String?
+  fullName     String
+  email        String   @unique
+  mobile       String   @unique
+  passwordHash String
+  address      String?
+  villageCity  String?
+  state        String?
+  pincode      String?
+  otp          String
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+
+  @@map("pending_registrations")
+}
+
+// ----------------------------------------------------
+// 3. CUSTOMERS (FARMERS)
+// ----------------------------------------------------
+model Farmer {
+  id           String   @id @default(uuid())
+  shopId       String
+  shop         Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  name         String
+  phone        String
+  email        String?
+  village      String?
+  address      String?
+  aadhaarNo    String?
+  creditLimit  Float    @default(0)
+  khataBalance Float    @default(0) // Positive = Farmer owes shop (Debit)
+  preferredLanguage String @default("en") // en, gu, gujlish
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  addresses    FarmerAddress[]
+  invoices     Invoice[]
+  transactions KhataTransaction[]
+  payments     Payment[]
+  khataAccount KhataAccount?
+  salesReturns SalesReturn[]
+  reminders    Reminder[]
+
+  @@unique([shopId, phone])
+  @@index([shopId, isActive, khataBalance])
+  @@index([shopId, name])
+  @@index([shopId, village])
+  @@map("farmers")
+}
+
+model FarmerAddress {
+  id        String  @id @default(uuid())
+  farmerId  String
+  farmer    Farmer  @relation(fields: [farmerId], references: [id], onDelete: Cascade)
+  address   String
+  village   String?
+  district  String?
+  state     String?
+  pincode   String?
+
+  @@map("farmer_addresses")
+}
+
+// ----------------------------------------------------
+// 4. PRODUCTS & CATEGORIES
+// ----------------------------------------------------
+model Category {
+  id          String   @id @default(uuid())
+  shopId      String?
+  shop        Shop?    @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  products Product[]
+
+  @@index([shopId])
+  @@map("categories")
+}
+
+model Unit {
+  id        String   @id @default(uuid())
+  name      String   @unique // Kilogram, Liter, Bag, Packet, Bottle, Piece
+  symbol    String   @unique // kg, ltr, bag, pkt, btl, pcs
+  createdAt DateTime @default(now())
+
+  products Product[]
+
+  @@map("units")
+}
+
+model ProductType {
+  id          String   @id @default(uuid())
+  shopId      String
+  shop        Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  name        String
+  shortName   String?
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  products Product[]
+
+  @@unique([shopId, name])
+  @@map("product_types")
+}
+
+model Product {
+  id            String       @id @default(uuid())
+  shopId        String
+  shop          Shop         @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  name          String
+  shortName     String?
+  code          String
+  hsnCode       String?
+  brand         String?
+  barcode       String?
+  categoryId    String
+  category      Category     @relation(fields: [categoryId], references: [id])
+  productTypeId String?
+  productType   ProductType? @relation(fields: [productTypeId], references: [id], onDelete: SetNull)
+  unitId        String?
+  unit          Unit?        @relation(fields: [unitId], references: [id])
+  uom           String       @default("unit")
+  taxRate       Float        @default(0)
+  minStock      Int          @default(5)
+  isActive      Boolean      @default(true)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  variants          ProductVariant[]
+  batches           InventoryBatch[]
+  invoiceItems        InvoiceItem[]
+  stockTransactions   StockTransaction[]
+  salesReturnItems    SalesReturnItem[]
+  purchaseReturnItems PurchaseReturnItem[]
+
+  @@unique([shopId, code])
+  @@index([shopId, isActive])
+  @@index([categoryId])
+  @@index([productTypeId])
+  @@index([barcode])
+  @@index([name])
+  @@map("products")
+}
+
+model ProductVariant {
+  id            String   @id @default(uuid())
+  productId     String
+  product       Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variantName   String // e.g. "500ml", "1kg", "50kg Bag"
+  shortName     String?
+  sku           String
+  barcode       String?
+  unit          String?
+  purchasePrice Float    @default(0)
+  mrp           Float    @default(0)
+  sellingPrice  Float    @default(0)
+  taxRate       Float?   @default(0)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  batches InventoryBatch[]
+
+  @@index([productId])
+  @@index([sku])
+  @@index([barcode])
+  @@map("product_variants")
+}
+
+// ----------------------------------------------------
+// 5. INVENTORY & BATCH TRACKING
+// ----------------------------------------------------
+model InventoryBatch {
+  id            String          @id @default(uuid())
+  shopId        String
+  shop          Shop            @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  productId     String
+  product       Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variantId     String?
+  variant       ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
+  supplierId    String?
+  supplier      Supplier?       @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  batchNumber   String
+  mfgDate       DateTime?
+  expiryDate    DateTime?
+  quantity      Int             @default(0)
+  purchasePrice Float           @default(0)
+  mrp           Float           @default(0)
+  sellingPrice  Float           @default(0)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  invoiceItems        InvoiceItem[]
+  stockTransactions   StockTransaction[]
+  salesReturnItems    SalesReturnItem[]
+  purchaseReturnItems PurchaseReturnItem[]
+
+  @@index([shopId, productId, quantity])
+  @@index([shopId, expiryDate])
+  @@index([supplierId])
+  @@index([variantId])
+  @@index([productId])
+  @@map("inventory_batches")
+}
+
+model StockTransaction {
+  id          String          @id @default(uuid())
+  shopId      String
+  shop        Shop            @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  productId   String
+  product     Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  batchId     String?
+  batch       InventoryBatch? @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  userId      String?
+  user        User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
+  type        String // IN, OUT, ADJUSTMENT, SALE, RETURN
+  quantity    Int
+  reason      String?
+  createdAt   DateTime        @default(now())
+
+  @@index([shopId, createdAt])
+  @@index([productId])
+  @@index([batchId])
+  @@index([type])
+  @@map("stock_transactions")
+}
+
+// ----------------------------------------------------
+// 6. SUPPLIERS
+// ----------------------------------------------------
+model Supplier {
+  id           String   @id @default(uuid())
+  shopId       String
+  shop         Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  name              String
+  companyName       String
+  phone             String
+  alternatePhone    String?
+  email             String?
+  address           String?
+  gstin             String?
+  suppliedProducts  String?
+  fertilizerLicense String?
+  pesticideLicense  String?
+  khataBalance      Float    @default(0) // Positive = Shop owes supplier (Credit)
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  batches      InventoryBatch[]
+  transactions KhataTransaction[]
+  supplierTxns SupplierTransaction[]
+  payments        Payment[]
+  khataAccount    KhataAccount?
+  purchaseReturns PurchaseReturn[]
+  reminders       Reminder[]
+  expenses        Expense[]
+
+  @@index([shopId, isActive])
+  @@index([phone])
+  @@index([name])
+  @@map("suppliers")
+}
+
+model SupplierTransaction {
+  id           String   @id @default(uuid())
+  shopId       String
+  shop         Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  supplierId   String
+  supplier     Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  type         String // PURCHASE, PAYMENT, RETURN
+  amount       Float
+  balanceAfter Float
+  referenceId  String?
+  createdAt    DateTime @default(now())
+
+  @@index([shopId, supplierId, createdAt])
+  @@map("supplier_transactions")
+}
+
+// ----------------------------------------------------
+// 7. BILLING & INVOICING
+// ----------------------------------------------------
+model Invoice {
+  id            String   @id @default(uuid())
+  invoiceNumber String
+  shopId        String
+  shop          Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  farmerId      String?
+  farmer        Farmer?  @relation(fields: [farmerId], references: [id], onDelete: SetNull)
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+  subTotal      Float
+  taxAmount     Float    @default(0)
+  discount      Float    @default(0)
+  totalAmount   Float
+  paidAmount    Float    @default(0)
+  paymentStatus String   @default("PAID") // PAID, PARTIAL, UNPAID
+  paymentMethod String   @default("CASH") // CASH, UPI, BANK_TRANSFER, KHATA, CHEQUE
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  items              InvoiceItem[]
+  payments           Payment[]
+  paymentAllocations PaymentAllocation[]
+  salesReturns       SalesReturn[]
+
+  @@unique([shopId, invoiceNumber])
+  @@index([shopId, paymentStatus, createdAt])
+  @@index([farmerId, paymentStatus])
+  @@index([shopId, createdAt])
+  @@index([userId])
+  @@map("invoices")
+}
+
+model InvoiceItem {
+  id         String          @id @default(uuid())
+  invoiceId  String
+  invoice    Invoice         @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  productId  String
+  product    Product         @relation(fields: [productId], references: [id])
+  batchId    String?
+  batch      InventoryBatch? @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  quantity   Int
+  unitPrice  Float
+  taxRate    Float           @default(0)
+  taxAmount  Float           @default(0)
+  totalPrice Float
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+
+  salesReturnItems SalesReturnItem[]
+
+  @@index([invoiceId])
+  @@index([productId])
+  @@index([batchId])
+  @@map("invoice_items")
+}
+
+// ----------------------------------------------------
+// 8. PAYMENTS & ALLOCATIONS
+// ----------------------------------------------------
+model Payment {
+  id            String    @id @default(uuid())
+  paymentNumber String
+  shopId        String
+  shop          Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  farmerId      String?
+  farmer        Farmer?   @relation(fields: [farmerId], references: [id], onDelete: SetNull)
+  supplierId    String?
+  supplier      Supplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  invoiceId     String?
+  invoice       Invoice?  @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  amount        Float
+  method        String    @default("CASH") // CASH, UPI, BANK_TRANSFER, CHEQUE
+  txnRef        String?
+  notes         String?
+  createdAt     DateTime  @default(now())
+
+  allocations PaymentAllocation[]
+
+  @@unique([shopId, paymentNumber])
+  @@index([shopId, createdAt])
+  @@index([farmerId])
+  @@index([supplierId])
+  @@index([invoiceId])
+  @@map("payments")
+}
+
+model PaymentAllocation {
+  id              String   @id @default(uuid())
+  paymentId       String
+  payment         Payment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  invoiceId       String
+  invoice         Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  amountAllocated Float
+  createdAt       DateTime @default(now())
+
+  @@index([paymentId])
+  @@index([invoiceId])
+  @@map("payment_allocations")
+}
+
+// ----------------------------------------------------
+// 9. KHATA LEDGER ACCOUNTS
+// ----------------------------------------------------
+model KhataAccount {
+  id          String    @id @default(uuid())
+  shopId      String
+  shop        Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  farmerId    String?   @unique
+  farmer      Farmer?   @relation(fields: [farmerId], references: [id], onDelete: Cascade)
+  supplierId  String?   @unique
+  supplier    Supplier? @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  totalDebit  Float     @default(0)
+  totalCredit Float     @default(0)
+  balance     Float     @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([shopId])
+  @@map("khata_accounts")
+}
+
+model KhataTransaction {
+  id            String    @id @default(uuid())
+  shopId        String
+  shop          Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  type          String // CREDIT or DEBIT
+  amount        Float
+  balanceAfter  Float
+  farmerId      String?
+  farmer        Farmer?   @relation(fields: [farmerId], references: [id], onDelete: Cascade)
+  supplierId    String?
+  supplier      Supplier? @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  referenceType String? // INVOICE, PAYMENT, PURCHASE, MANUAL
+  referenceId   String?
+  description   String?
+  createdAt     DateTime  @default(now())
+
+  @@index([shopId, farmerId, createdAt])
+  @@index([shopId, supplierId, createdAt])
+  @@map("khata_transactions")
+}
+
+// ----------------------------------------------------
+// 10. CASH CLOSING & TRANSACTIONS
+// ----------------------------------------------------
+model CashClosing {
+  id           String   @id @default(uuid())
+  shopId       String
+  shop         Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User     @relation(fields: [userId], references: [id])
+  date         DateTime @default(now())
+  openingCash  Float    @default(0)
+  cashSales    Float    @default(0)
+  cashExpense  Float    @default(0)
+  expectedCash Float    @default(0)
+  actualCash   Float    @default(0)
+  discrepancy  Float    @default(0)
+  status       String   @default("OPEN") // OPEN, CLOSED
+  notes        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  transactions CashTransaction[]
+
+  @@index([shopId, date])
+  @@map("cash_closings")
+}
+
+model CashTransaction {
+  id            String      @id @default(uuid())
+  shopId        String
+  shop          Shop        @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  cashClosingId String
+  cashClosing   CashClosing @relation(fields: [cashClosingId], references: [id], onDelete: Cascade)
+  type          String // IN, OUT
+  amount        Float
+  category      String // SALE, EXPENSE, DRAWING, INJECTION
+  description   String?
+  createdAt     DateTime    @default(now())
+
+  @@index([shopId, cashClosingId, createdAt])
+  @@map("cash_transactions")
+}
+
+// ----------------------------------------------------
+// 11. SETTINGS & CONFIGURATIONS
+// ----------------------------------------------------
+model Setting {
+  id        String   @id @default(uuid())
+  shopId    String?
+  shop      Shop?    @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  key       String
+  value     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([shopId, key])
+  @@map("settings")
+}
+
+// ----------------------------------------------------
+// 12. AUDIT LOG SYSTEM
+// ----------------------------------------------------
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  shopId    String?
+  shop      Shop?    @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  action    String
+  module    String
+  recordId  String?
+  oldValue  String?
+  newValue  String?
+  ipAddress String?
+  createdAt DateTime @default(now())
+
+  @@index([shopId, createdAt])
+  @@index([recordId])
+  @@index([module])
+  @@map("audit_logs")
+}
+
+// ----------------------------------------------------
+// 13. SALES & PURCHASE RETURNS
+// ----------------------------------------------------
+model SalesReturn {
+  id           String   @id @default(uuid())
+  returnNumber String
+  shopId       String
+  shop         Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  invoiceId    String
+  invoice      Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  farmerId     String?
+  farmer       Farmer?  @relation(fields: [farmerId], references: [id], onDelete: SetNull)
+  userId       String?
+  user         User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  returnAmount Float
+  reason       String   // DAMAGED, DEFECTIVE, WRONG_PRODUCT, EXPIRED, CUSTOMER_CHANGED_MIND, WRONG_QUANTITY, QUALITY_ISSUE, OTHER
+  refundMethod String   // STORE_CREDIT, CASH, UPI, BANK_TRANSFER, ADJUST_DUE
+  status       String   @default("COMPLETED") // COMPLETED, REVERSED
+  notes        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  items SalesReturnItem[]
+
+  @@unique([shopId, returnNumber])
+  @@index([shopId, invoiceId])
+  @@index([farmerId])
+  @@map("sales_returns")
+}
+
+model SalesReturnItem {
+  id            String          @id @default(uuid())
+  salesReturnId String
+  salesReturn   SalesReturn     @relation(fields: [salesReturnId], references: [id], onDelete: Cascade)
+  invoiceItemId String
+  invoiceItem   InvoiceItem     @relation(fields: [invoiceItemId], references: [id], onDelete: Cascade)
+  productId     String
+  product       Product         @relation(fields: [productId], references: [id])
+  batchId       String?
+  batch         InventoryBatch? @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  quantity      Int
+  unitPrice     Float
+  taxAmount     Float           @default(0)
+  totalPrice    Float
+  condition     String          @default("GOOD") // GOOD, DAMAGED, EXPIRED
+  createdAt     DateTime        @default(now())
+
+  @@index([salesReturnId])
+  @@index([invoiceItemId])
+  @@index([productId])
+  @@index([batchId])
+  @@map("sales_return_items")
+}
+
+model PurchaseReturn {
+  id               String    @id @default(uuid())
+  returnNumber     String
+  shopId           String
+  shop             Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  supplierId       String?
+  supplier         Supplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  userId           String?
+  user             User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  returnAmount     Float
+  reason           String    // DAMAGED, DEFECTIVE, EXPIRED, WRONG_SUPPLY, QUALITY_ISSUE, OTHER
+  settlementMethod String    // SUPPLIER_CREDIT, SUPPLIER_REFUND, ADJUST_PAYABLE
+  status           String    @default("COMPLETED") // COMPLETED, REVERSED
+  notes            String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  items PurchaseReturnItem[]
+
+  @@unique([shopId, returnNumber])
+  @@index([shopId, supplierId])
+  @@map("purchase_returns")
+}
+
+model PurchaseReturnItem {
+  id               String          @id @default(uuid())
+  purchaseReturnId String
+  purchaseReturn   PurchaseReturn  @relation(fields: [purchaseReturnId], references: [id], onDelete: Cascade)
+  batchId          String?
+  batch            InventoryBatch? @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  productId        String
+  product          Product         @relation(fields: [productId], references: [id])
+  quantity         Int
+  unitCost         Float
+  totalCost        Float
+  condition        String          @default("DAMAGED") // GOOD, DAMAGED, EXPIRED
+  createdAt        DateTime        @default(now())
+
+  @@index([purchaseReturnId])
+  @@index([productId])
+  @@index([batchId])
+  @@map("purchase_return_items")
+}
+
+// ----------------------------------------------------
+// 14. NOTIFICATION & ALERT SYSTEM
+// ----------------------------------------------------
+model Notification {
+  id         String    @id @default(uuid())
+  shopId     String
+  shop       Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  userId     String?
+  user       User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  type       String    // LOW_STOCK, OUT_OF_STOCK, OVERDUE_CREDIT, UPCOMING_DUE, PAYMENT_RECEIVED, RESTOCK_COMPLETED, SALES_RETURN_CREATED, PURCHASE_RETURN_CREATED, EXPIRY_WARNING, EXPIRY_TODAY, SYSTEM_ALERT
+  priority   String    @default("MEDIUM") // LOW, MEDIUM, HIGH, CRITICAL
+  title      String
+  message    String
+  entityType String?   // PRODUCT, PRODUCT_VARIANT, FARMER, SUPPLIER, INVOICE, RESTOCK, SALES_RETURN, PURCHASE_RETURN, INVENTORY_BATCH
+  entityId   String?
+  dedupeKey  String?   // Uniqueness key to prevent duplicate notifications (e.g. LOW_STOCK:variantId)
+  isRead     Boolean   @default(false)
+  readAt     DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@unique([shopId, dedupeKey])
+  @@index([shopId, isRead, createdAt])
+  @@map("notifications")
+}
+
+model NotificationPreference {
+  id                  String   @id @default(uuid())
+  shopId              String
+  shop                Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  userId              String   @unique
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  enableLowStock      Boolean  @default(true)
+  enableOutOfStock    Boolean  @default(true)
+  enableOverdueCredit Boolean  @default(true)
+  enableUpcomingDue   Boolean  @default(true)
+  enablePayment       Boolean  @default(true)
+  enableRestock       Boolean  @default(true)
+  enableReturns       Boolean  @default(true)
+  enableExpiry        Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@map("notification_preferences")
+}
+
+// ----------------------------------------------------
+// 15. EXPORT & BACKUP SYSTEM
+// ----------------------------------------------------
+model ExportLog {
+  id        String   @id @default(uuid())
+  shopId    String
+  shop      Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  type      String   // SALES, PURCHASES, FARMERS, SUPPLIERS, PRODUCTS, INVENTORY, PAYMENTS, CREDIT, SALES_RETURNS, PURCHASE_RETURNS, REPORTS
+  format    String   // CSV, JSON, XLSX
+  fileName  String
+  filePath  String?
+  fileSize  Int?     // Size in bytes
+  status    String   @default("COMPLETED") // QUEUED, PROCESSING, COMPLETED, FAILED, EXPIRED
+  createdAt DateTime @default(now())
+
+  @@map("export_logs")
+}
+
+model BackupLog {
+  id        String   @id @default(uuid())
+  shopId    String
+  shop      Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  type      String   @default("LOGICAL_JSON") // FULL_DATABASE, LOGICAL_JSON
+  fileName  String
+  filePath  String
+  fileSize  Int      // Size in bytes
+  status    String   @default("COMPLETED") // COMPLETED, FAILED, RESTORED
+  metadata  String?  // JSON metadata (version, record counts)
+  createdAt DateTime @default(now())
+
+  @@map("backup_logs")
+}
+
+// ----------------------------------------------------
+// 16. SMART REMINDERS & PROCUREMENT
+// ----------------------------------------------------
+model Reminder {
+  id             String    @id @default(uuid())
+  shopId         String
+  shop           Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  userId         String?
+  user           User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  farmerId       String?
+  farmer         Farmer?   @relation(fields: [farmerId], references: [id], onDelete: SetNull)
+  supplierId     String?
+  supplier       Supplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  title          String
+  description    String?
+  type           String    @default("FARMER_PRODUCT_DEMAND") // FARMER_PRODUCT_DEMAND, DEALER_ORDER, PAYMENT_FOLLOWUP, GENERAL
+  priority       String    @default("MEDIUM") // LOW, MEDIUM, HIGH, URGENT
+  dueDate        DateTime
+  status         String    @default("PENDING") // PENDING, ORDERED_TO_DEALER, STOCK_ARRIVED, COMPLETED, CANCELLED
+  productName    String?
+  quantityNeeded Float?
+  unit           String?
+  estimatedCost  Float?
+  advancePaid    Float?    @default(0)
+  orderedAt      DateTime?
+  arrivedAt      DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([shopId, status, dueDate])
+  @@index([shopId, type])
+  @@index([farmerId])
+  @@index([supplierId])
+  @@map("reminders")
+}
+
+// ----------------------------------------------------
+// 17. EXPENSE & DEALER INWARD PROCUREMENT MANAGEMENT
+// ----------------------------------------------------
+model Expense {
+  id            String    @id @default(uuid())
+  expenseNumber String
+  shopId        String
+  shop          Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  userId        String?
+  user          User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  supplierId    String?
+  supplier      Supplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  category      String    // DEALER_PROCUREMENT, FREIGHT_TRANSPORT, LABOR_HAMALI, SHOP_RENT, ELECTRICITY_UTILITIES, STAFF_SALARY, PACKAGING, MAINTENANCE, OTHER
+  title         String
+  amount        Float
+  paymentMethod String    @default("CASH") // CASH, UPI, BANK_TRANSFER, CHEQUE, KHATA
+  paymentRef    String?
+  billNumber    String?
+  billDate      DateTime?
+  expenseDate   DateTime  @default(now())
+  notes         String?
+  receiptUrl    String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@unique([shopId, expenseNumber])
+  @@index([shopId, category, expenseDate])
+  @@index([shopId, expenseDate])
+  @@index([supplierId])
+  @@map("expenses")
+}
+
+
+
+
