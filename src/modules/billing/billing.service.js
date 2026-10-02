@@ -307,27 +307,24 @@ async function createInvoice(userId, data) {
     // D. Update Farmer Khata & record DEBIT Transaction if credit/due balance remains
     let updatedKhataBalance = farmer ? farmer.khataBalance : 0;
     if (remainingDue > 0 && farmer) {
-      const currentFarmer = await tx.farmer.findUnique({ where: { id: farmer.id } });
-      if (currentFarmer) {
-        updatedKhataBalance = currentFarmer.khataBalance + remainingDue;
-        await tx.farmer.update({
-          where: { id: farmer.id },
-          data: { khataBalance: updatedKhataBalance },
-        });
+      updatedKhataBalance = (farmer.khataBalance || 0) + remainingDue;
+      await tx.farmer.update({
+        where: { id: farmer.id },
+        data: { khataBalance: { increment: remainingDue } },
+      });
 
-        await tx.khataTransaction.create({
-          data: {
-            shopId,
-            farmerId: farmer.id,
-            type: 'DEBIT',
-            amount: remainingDue,
-            balanceAfter: updatedKhataBalance,
-            referenceType: 'INVOICE',
-            referenceId: invoice.id,
-            description: `Credit sale against Invoice #${invoiceNumber}`,
-          },
-        });
-      }
+      await tx.khataTransaction.create({
+        data: {
+          shopId,
+          farmerId: farmer.id,
+          type: 'DEBIT',
+          amount: remainingDue,
+          balanceAfter: updatedKhataBalance,
+          referenceType: 'INVOICE',
+          referenceId: invoice.id,
+          description: `Credit sale against Invoice #${invoiceNumber}`,
+        },
+      });
     }
 
     return {
@@ -340,6 +337,9 @@ async function createInvoice(userId, data) {
         totalFarmerKhataBalance: updatedKhataBalance,
       },
     };
+  }, {
+    maxWait: 15000,
+    timeout: 30000,
   });
 
   emitShopEvent(shopId, 'bill.created', result.invoice);
@@ -600,6 +600,9 @@ async function cancelInvoice(invoiceId, shopId, userId, reason = 'Customer Cance
     });
 
     return cancelledInvoice;
+  }, {
+    maxWait: 15000,
+    timeout: 30000,
   });
 
   emitShopEvent(result.shopId, 'bill.cancelled', result);
