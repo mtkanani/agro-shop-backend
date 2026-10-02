@@ -1,5 +1,6 @@
 const { prisma } = require('../../config/database');
 const reportService = require('../reports/reports.service');
+const { memoryCache } = require('../../utils/cache');
 
 async function getDashboardSummary(shopId, query = {}) {
   if (!shopId) {
@@ -7,6 +8,10 @@ async function getDashboardSummary(shopId, query = {}) {
     err.statusCode = 400;
     throw err;
   }
+
+  const cacheKey = `dashboard:summary:${shopId}:${JSON.stringify(query)}`;
+  const cached = memoryCache.get(cacheKey);
+  if (cached) return cached;
 
   const dateRange = reportService.getDateRange(query.filter ? query : { filter: 'today' });
   const invoiceWhere = { shopId, paymentStatus: { not: 'CANCELLED' } };
@@ -122,7 +127,7 @@ async function getDashboardSummary(shopId, query = {}) {
     }
   });
 
-  return {
+  const result = {
     sales: {
       amount: salesAmount,
       invoiceCount,
@@ -152,19 +157,38 @@ async function getDashboardSummary(shopId, query = {}) {
       outOfStock,
     },
   };
+
+  memoryCache.set(cacheKey, result, 30); // 30 seconds memory cache
+  return result;
 }
 
 async function getSalesTrend(shopId, query = {}) {
-  return reportService.getSalesTrend(shopId, query);
+  const cacheKey = `dashboard:salestrend:${shopId}:${JSON.stringify(query)}`;
+  const cached = memoryCache.get(cacheKey);
+  if (cached) return cached;
+
+  const result = await reportService.getSalesTrend(shopId, query);
+  memoryCache.set(cacheKey, result, 30);
+  return result;
 }
 
 async function getTopProducts(shopId, query = {}) {
+  const cacheKey = `dashboard:topproducts:${shopId}:${JSON.stringify(query)}`;
+  const cached = memoryCache.get(cacheKey);
+  if (cached) return cached;
+
   const report = await reportService.getProductSalesReport({ shopId, ...query });
   const limit = query.limit ? parseInt(query.limit, 10) : 5;
-  return report.products.slice(0, limit);
+  const result = report.products.slice(0, limit);
+  memoryCache.set(cacheKey, result, 30);
+  return result;
 }
 
 async function getLowStockProducts(shopId) {
+  const cacheKey = `dashboard:lowstock:${shopId}`;
+  const cached = memoryCache.get(cacheKey);
+  if (cached) return cached;
+
   const products = await prisma.product.findMany({
     where: { shopId, isActive: true },
     include: {
@@ -191,10 +215,15 @@ async function getLowStockProducts(shopId) {
   });
 
   alerts.sort((a, b) => a.currentStock - b.currentStock);
+  memoryCache.set(cacheKey, alerts, 30);
   return alerts;
 }
 
 async function getCreditSummary(shopId) {
+  const cacheKey = `dashboard:credit:${shopId}`;
+  const cached = memoryCache.get(cacheKey);
+  if (cached) return cached;
+
   const farmerCreditService = require('../farmer-credit/farmer-credit.service');
   const overview = await farmerCreditService.getCreditOverview(shopId);
 
@@ -205,13 +234,20 @@ async function getCreditSummary(shopId) {
     take: 5,
   });
 
-  return {
+  const result = {
     ...overview,
     topFarmers: topFarmersList,
   };
+
+  memoryCache.set(cacheKey, result, 30);
+  return result;
 }
 
 async function getRecentSales(shopId, limit = 10) {
+  const cacheKey = `dashboard:recentsales:${shopId}:${limit}`;
+  const cached = memoryCache.get(cacheKey);
+  if (cached) return cached;
+
   const invoices = await prisma.invoice.findMany({
     where: { shopId, paymentStatus: { not: 'CANCELLED' } },
     take: parseInt(limit, 10),
@@ -221,7 +257,7 @@ async function getRecentSales(shopId, limit = 10) {
     },
   });
 
-  return invoices.map((inv) => ({
+  const result = invoices.map((inv) => ({
     id: inv.id,
     invoiceNumber: inv.invoiceNumber,
     farmerName: inv.farmer ? inv.farmer.name : 'Walk-in Customer',
@@ -233,9 +269,16 @@ async function getRecentSales(shopId, limit = 10) {
     paymentMethod: inv.paymentMethod,
     createdAt: inv.createdAt,
   }));
+
+  memoryCache.set(cacheKey, result, 30);
+  return result;
 }
 
 async function getRecentPayments(shopId, limit = 10) {
+  const cacheKey = `dashboard:recentpayments:${shopId}:${limit}`;
+  const cached = memoryCache.get(cacheKey);
+  if (cached) return cached;
+
   const payments = await prisma.payment.findMany({
     where: { shopId },
     take: parseInt(limit, 10),
@@ -245,7 +288,7 @@ async function getRecentPayments(shopId, limit = 10) {
     },
   });
 
-  return payments.map((p) => ({
+  const result = payments.map((p) => ({
     id: p.id,
     paymentNumber: p.paymentNumber,
     farmerName: p.farmer ? p.farmer.name : 'Walk-in Customer',
@@ -254,9 +297,16 @@ async function getRecentPayments(shopId, limit = 10) {
     txnRef: p.txnRef,
     createdAt: p.createdAt,
   }));
+
+  memoryCache.set(cacheKey, result, 30);
+  return result;
 }
 
 async function getRecentRestocks(shopId, limit = 10) {
+  const cacheKey = `dashboard:recentrestocks:${shopId}:${limit}`;
+  const cached = memoryCache.get(cacheKey);
+  if (cached) return cached;
+
   const batches = await prisma.inventoryBatch.findMany({
     where: { shopId },
     take: parseInt(limit, 10),
@@ -267,7 +317,7 @@ async function getRecentRestocks(shopId, limit = 10) {
     },
   });
 
-  return batches.map((b) => ({
+  const result = batches.map((b) => ({
     id: b.id,
     batchNumber: b.batchNumber,
     supplierName: b.supplier ? (b.supplier.companyName || b.supplier.name) : 'Direct Intake',
@@ -277,6 +327,9 @@ async function getRecentRestocks(shopId, limit = 10) {
     totalCost: b.quantity * b.purchasePrice,
     createdAt: b.createdAt,
   }));
+
+  memoryCache.set(cacheKey, result, 30);
+  return result;
 }
 
 module.exports = {

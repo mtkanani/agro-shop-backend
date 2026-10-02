@@ -1,3 +1,4 @@
+const { memoryCache } = require('../../utils/cache');
 const { prisma } = require('../../config/database');
 const { getPagination, getPaginationMeta } = require('../../utils/pagination');
 const { emitShopEvent } = require('../../config/socket');
@@ -226,29 +227,29 @@ async function createInvoice(userId, data) {
 
   // 6. Execute Atomic Database Transaction
   const result = await prisma.$transaction(async (tx) => {
-    // A. Deduct stock quantities from InventoryBatch & record STOCK_OUT
-    for (const pItem of processedItems) {
-      if (pItem.batchId) {
-        await tx.inventoryBatch.update({
-          where: { id: pItem.batchId },
-          data: {
-            quantity: { decrement: pItem.quantity },
-          },
-        });
+    // A. Deduct stock quantities from InventoryBatch & record STOCK_OUT in parallel
+    await Promise.all(
+      processedItems
+        .filter((p) => p.batchId)
+        .map(async (pItem) => {
+          await tx.inventoryBatch.update({
+            where: { id: pItem.batchId },
+            data: { quantity: { decrement: pItem.quantity } },
+          });
 
-        await tx.stockTransaction.create({
-          data: {
-            shopId,
-            productId: pItem.productId,
-            batchId: pItem.batchId,
-            type: 'SALE',
-            quantity: -pItem.quantity,
-            reason: `Sales Invoice #${invoiceNumber}`,
-            userId,
-          },
-        });
-      }
-    }
+          await tx.stockTransaction.create({
+            data: {
+              shopId,
+              productId: pItem.productId,
+              batchId: pItem.batchId,
+              type: 'SALE',
+              quantity: -pItem.quantity,
+              reason: `Sales Invoice #${invoiceNumber}`,
+              userId,
+            },
+          });
+        })
+    );
 
     // B. Create Invoice record
     const invoice = await tx.invoice.create({
@@ -343,6 +344,10 @@ async function createInvoice(userId, data) {
   });
 
   emitShopEvent(shopId, 'bill.created', result.invoice);
+  // Instantly invalidate cached dashboard summaries for this shop
+  if (memoryCache && typeof memoryCache.invalidatePattern === 'function') {
+    memoryCache.invalidatePattern(shopId);
+  }
   emitShopEvent(shopId, 'stock.updated', { shopId });
   if (remainingDue > 0 && farmer) {
     emitShopEvent(shopId, 'khata.updated', { farmerId: farmer.id });
